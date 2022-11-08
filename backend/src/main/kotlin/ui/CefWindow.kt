@@ -1,5 +1,9 @@
 package ui
 
+import ServiceManager
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import me.friwi.jcefmaven.CefAppBuilder
 import me.friwi.jcefmaven.MavenCefAppHandlerAdapter
 import org.cef.CefApp
@@ -7,10 +11,15 @@ import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.browser.CefMessageRouter
+import org.cef.callback.CefAuthCallback
+import org.cef.callback.CefCallback
 import org.cef.callback.CefNativeAdapter
 import org.cef.callback.CefQueryCallback
-import org.cef.handler.CefFocusHandlerAdapter
-import org.cef.handler.CefMessageRouterHandler
+import org.cef.handler.*
+import org.cef.misc.BoolRef
+import org.cef.network.CefRequest
+import threads.ThreadService
+import utils.AssetService
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.KeyboardFocusManager
@@ -20,6 +29,8 @@ import javax.swing.JFrame
 
 class CefWindow(
     startURL: String,
+    val srvMgr: ServiceManager,
+    val jsFuncs: Map<String, (String) -> String> = mapOf(),
     useOSR: Boolean = false,
     isTransparent: Boolean = false,
 ): JFrame() {
@@ -29,6 +40,9 @@ class CefWindow(
     private val browser_: CefBrowser
     private val browerUI_: Component
     private var browserFocus_ = true
+
+    @Serializable
+    data class JsFunc(val name: String)
 
     init {
         // (0) Initialize CEF using the maven loader
@@ -79,6 +93,8 @@ class CefWindow(
         val msgRouter = CefMessageRouter.create()
 
         msgRouter.addHandler(object: CefNativeAdapter(), CefMessageRouterHandler {
+            private val json = Json(Json.Default, { ignoreUnknownKeys = true })
+
             override fun onQuery(
                 browser: CefBrowser,
                 frame: CefFrame,
@@ -88,11 +104,21 @@ class CefWindow(
                 callback: CefQueryCallback
             ): Boolean {
 
-                println("Received query: $request")
+                val f = json.decodeFromString<JsFunc>(request)
 
-                callback.success("Hello from Kotlin!")
+                jsFuncs[f.name]?.let({
+                    srvMgr.get<ThreadService>().pool.submit({
+                        try {
+                            callback.success(it(request))
+                        } catch(e: Exception) {
+                            e.printStackTrace()
+                            callback.failure(1, e.message ?: "Unknown error")
+                        }
+                    })
+                    return true
+                })
 
-                return true
+                return false
             }
 
             override fun onQueryCanceled(browser: CefBrowser, frame: CefFrame, queryId: Long) {
@@ -118,6 +144,8 @@ class CefWindow(
         browser_ = client_.createBrowser(startURL, useOSR, isTransparent)
         browerUI_ = browser_.uiComponent
 
+        if(srvMgr.get<AssetService>().assetsPackaged)
+            client_.addRequestHandler(AssetRequestHandler(srvMgr))
 
 
         // Clear focus from the address field when the browser gains focus.
@@ -152,9 +180,7 @@ class CefWindow(
         })
     }
 
-    fun executeJs() {
-        browser_.executeJavaScript("window.extraFunc();", browser_.url, 0)
+    fun executeHook(arg: String) {
+        browser_.executeJavaScript("window.cefHook($arg);", browser_.url, 0)
     }
-
-    fun addJSFunction
 }

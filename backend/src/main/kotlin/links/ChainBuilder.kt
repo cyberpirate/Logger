@@ -1,5 +1,8 @@
 package links
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class LinkDesc(
     val linkName: String,
     val args: List<String> = emptyList()

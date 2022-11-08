@@ -11,16 +11,30 @@ class ThreadService(private val corePoolSize: Int = 8) : Service {
     lateinit var pool: ScheduledExecutorService
         private set
 
-    private lateinit var iwThread: IntermittentWorkerThread
-    val iWorkers: CopyOnWriteArraySet<IntermittentWorker> get() = iwThread.workers
+    val iWorkers = CopyOnWriteArraySet<IntermittentWorker>()
 
     override fun setup(srvMgr: ServiceManager) {
         pool = Executors.newScheduledThreadPool(corePoolSize)
-        iwThread = IntermittentWorkerThread(CopyOnWriteArraySet<IntermittentWorker>())
+    }
+
+    fun runIWorkers(runFor: Long = 1000) {
+        val stopAt = System.currentTimeMillis() + runFor
+
+        while(System.currentTimeMillis() < stopAt) {
+            val it = iWorkers.iterator()
+            while (System.currentTimeMillis() < stopAt && it.hasNext()) {
+                val w = it.next()
+
+                if (w.needsWork)
+                    w.work()
+
+                if (w.finished)
+                    it.remove()
+            }
+        }
     }
 
     override fun teardown() {
         pool.shutdown()
-        iwThread.running = false
     }
 }
